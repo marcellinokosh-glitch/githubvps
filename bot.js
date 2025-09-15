@@ -1,7 +1,8 @@
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const config = require('./config.json');
+const TOKEN = process.env.TOKEN;
+const MONGO_URI = process.env.MONGO_URI;
 const chokidar = require('chokidar');
 const { exec } = require('child_process');
 
@@ -192,4 +193,4 @@ function deployCommands() {
     });
 }
 
-client.login(config.token);
+client.login(TOKEN);
