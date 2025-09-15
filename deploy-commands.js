@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { REST, Routes } = require('discord.js');
 const clientId = process.env.CLIENT_ID;
 const guildId = process.env.GUILD_ID;
@@ -12,7 +13,10 @@ fs.readdirSync(commandesPath).forEach(categorie => {
     fs.readdirSync(categoriePath).forEach(file => {
         if (file.endsWith('.js')) {
             const command = require(path.join(categoriePath, file));
-            commands.push(command.data.toJSON());
+            if (command && command.data && typeof command.data.toJSON === 'function') {
+                commands.push(command.data.toJSON());
+            }
+            // Sinon, ignore (pas une commande slash)
         }
     });
 });

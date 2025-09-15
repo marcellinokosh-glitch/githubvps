@@ -16,13 +16,22 @@ module.exports = {
             const files = fs.readdirSync(path.join(commandesPath, categorie)).filter(f => f.endsWith('.js'));
             const commandNames = files.map(f => {
                 const cmd = require(path.join(commandesPath, categorie, f));
+                // Affiche slash ET commandes prefixées (name ou data.name)
+                let name = null;
                 if (cmd && cmd.data && cmd.data.name) {
-                    return `\`/${cmd.data.name}\``;
+                    name = `/${cmd.data.name}`;
+                } else if (cmd && cmd.name) {
+                    name = `!${cmd.name}`;
+                }
+                if (name) {
+                    // Masque les underscores dans les noms de commandes
+                    return `\`${name.replace(/_/g, ' ')}\``;
                 }
                 return null;
             }).filter(Boolean);
             if (commandNames.length > 0) {
-                description += `**${categorie}**\n${commandNames.join(' ')}\n\n`;
+                // Masque les underscores dans les noms de catégories
+                description += `**${categorie.replace(/_/g, ' ')}**\n${commandNames.join(' ')}\n\n`;
             }
         }
 

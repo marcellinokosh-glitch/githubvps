@@ -32,18 +32,10 @@ module.exports = {
                 .setTitle('⛔ Accès refusé')
                 .setDescription("Tu n'as pas la permission d'utiliser cette commande.")
                 .setColor(0xED4245);
-            if (isSlash) {
-                return interaction.reply({ embeds: [errorEmbed], flags: 64 });
-            } else {
-                return interaction.reply({ embeds: [errorEmbed] });
-            }
+            return interaction.reply({ embeds: [errorEmbed], flags: 64 });
         }
 
-        if (isSlash) {
-            await interaction.reply({ embeds: [embed], flags: 64 });
-        } else {
-            await interaction.reply({ embeds: [embed] });
-        }
+        await interaction.reply({ embeds: [embed], flags: 64 });
         process.exit(0);
     }
 };

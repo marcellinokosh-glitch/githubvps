@@ -2,14 +2,11 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-console.log('TOKEN:', process.env.TOKEN);
-console.log('MONGO_URI:', process.env.MONGO_URI);
 const TOKEN = process.env.TOKEN;
 const MONGO_URI = process.env.MONGO_URI;
 const chokidar = require('chokidar');
 const { exec } = require('child_process');
 const mongoose = require('mongoose');
-const ServerConfig = require('./commandes/configuration_serveur/serverConfig');
 
 const client = new Client({
     intents: [
@@ -27,11 +24,13 @@ fs.readdirSync(commandesPath).forEach(categorie => {
     fs.readdirSync(categoriePath).forEach(file => {
         if (file.endsWith('.js')) {
             const command = require(path.join(categoriePath, file));
+            // Ajoute si commande slash (data.name) ou prefix (name)
             if (command && command.data && command.data.name) {
                 client.commands.set(command.data.name, command);
-            } else {
-                console.warn(`[WARN] Commande ignorée (pas de data.name): ${categorie}/${file}`);
+            } else if (command && command.name) {
+                client.commands.set(command.name, command);
             }
+            // Sinon, ignore silencieusement
         }
     });
 });
@@ -60,9 +59,20 @@ function sendUptimeEmbed(client, embed) {
 
 const uptimeMessageFile = path.join(__dirname, 'uptime_message.json');
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
     console.log('🚀 Le bot est lancé !');
-    sendUptimeMessage(client, '🟢 Le bot vient de démarrer !');
+
+    // Embed démarrage
+    if (uptimeChannelId) {
+        const { EmbedBuilder } = require('discord.js');
+        const startEmbed = new EmbedBuilder()
+            .setTitle('🟢 Le bot vient de démarrer !')
+            .setDescription('Le bot est en ligne et prêt à fonctionner.')
+            .setColor(0x57F287)
+            .setTimestamp();
+        const channel = client.channels.cache.get(uptimeChannelId);
+        if (channel) channel.send({ embeds: [startEmbed] }).catch(() => {});
+    }
 
     // Envoie ou modifie l'embed de redémarrage dans le salon uptime
     const { EmbedBuilder } = require('discord.js');
@@ -102,50 +112,85 @@ client.once('ready', async () => {
     }
 });
 
+
 process.on('beforeExit', () => {
-    if (client && client.isReady()) sendUptimeMessage(client, '🔴 Le bot va s\'éteindre !');
+    if (client && client.isReady() && uptimeChannelId) {
+        const { EmbedBuilder } = require('discord.js');
+        const stopEmbed = new EmbedBuilder()
+            .setTitle('🔴 Le bot va s\'éteindre !')
+            .setDescription('Le bot va s\'arrêter ou redémarrer.')
+            .setColor(0xED4245)
+            .setTimestamp();
+        const channel = client.channels.cache.get(uptimeChannelId);
+        if (channel) channel.send({ embeds: [stopEmbed] }).catch(() => {});
+    }
 });
+
 
 process.on('uncaughtException', (err) => {
-    if (client && client.isReady()) sendUptimeMessage(client, `❌ Erreur non gérée :\n\`\`\`${err.stack}\`\`\``);
+    if (client && client.isReady() && uptimeChannelId) {
+        const { EmbedBuilder } = require('discord.js');
+        const errorEmbed = new EmbedBuilder()
+            .setTitle('❌ Erreur non gérée')
+            .setDescription(`\`\`\`${err.stack}\`\`\``)
+            .setColor(0xED4245)
+            .setTimestamp();
+        const channel = client.channels.cache.get(uptimeChannelId);
+        if (channel) channel.send({ embeds: [errorEmbed] }).catch(() => {});
+    }
 });
 
+
 fs.watch(__filename, () => {
-    if (client && client.isReady()) sendUptimeMessage(client, '🛠️ Le code du bot a été modifié et rechargé.');
+    if (client && client.isReady() && uptimeChannelId) {
+        const { EmbedBuilder } = require('discord.js');
+        const reloadEmbed = new EmbedBuilder()
+            .setTitle('🛠️ Code rechargé')
+            .setDescription('Le code du bot a été modifié et rechargé.')
+            .setColor(0x5865F2)
+            .setTimestamp();
+        const channel = client.channels.cache.get(uptimeChannelId);
+        if (channel) channel.send({ embeds: [reloadEmbed] }).catch(() => {});
+    }
 });
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // Vérifie la config serveur pour slashEnabled
-    let slashEnabled = true;
-    if (interaction.guildId) {
-        const config = await ServerConfig.findOne({ guildId: interaction.guildId });
-        if (config && config.slashEnabled === false) return;
-    }
-
     const command = client.commands.get(interaction.commandName);
-
     if (!command) return;
-
     try {
         await command.execute(interaction);
     } catch (error) {
         console.error(error);
-        // Ne répond que si ce n'est pas déjà fait
         if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({ content: 'Erreur lors de l\'exécution de la commande.', flags: 64 });
         }
     }
 });
 
-const PREFIX = '!';
+
+const GuildConfig = require('./commandes/configuration_serveur/guildConfig');
+const DEFAULT_PREFIX = '!';
+
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
-    if (!message.content.startsWith(PREFIX)) return;
 
-    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+    // Récupère le préfixe personnalisé ou par défaut
+    let prefix = DEFAULT_PREFIX;
+    try {
+        if (message.guild) {
+            const config = await GuildConfig.findOne({ guildId: message.guild.id });
+            if (config && config.prefix) prefix = config.prefix;
+        }
+    } catch (e) {
+        // ignore erreur mongo, fallback sur le préfixe par défaut
+    }
+
+    if (!message.content.startsWith(prefix)) return;
+
+    const args = message.content.slice(prefix.length).trim().split(/ +/);
     const commandName = args.shift().toLowerCase();
 
     const command = client.commands.get(commandName);
@@ -159,7 +204,12 @@ client.on('messageCreate', async message => {
             guild: message.guild,
             channel: message.channel,
             client: client,
-            reply: (options) => message.reply(typeof options === 'string' ? options : options.content),
+            reply: (options) => {
+                if (typeof options === 'string') return message.reply(options);
+                if (options.embeds) return message.reply({ embeds: options.embeds });
+                if (options.content) return message.reply(options.content);
+                return message.reply('Réponse vide.');
+            },
             options: {
                 getString: () => args[0] // Prend le premier argument comme option string
             },
@@ -180,7 +230,12 @@ function loadCommands() {
             if (file.endsWith('.js')) {
                 delete require.cache[require.resolve(path.join(categoriePath, file))];
                 const command = require(path.join(categoriePath, file));
-                client.commands.set(command.data ? command.data.name : command.name, command);
+                if (command && command.data && command.data.name) {
+                    client.commands.set(command.data.name, command);
+                } else if (command && command.name) {
+                    client.commands.set(command.name, command);
+                }
+                // Sinon, ignore silencieusement
             }
         });
     });
@@ -209,23 +264,9 @@ function deployCommands() {
     });
 }
 
-console.log('Connexion à MongoDB...');
-const mongoTimeout = setTimeout(() => {
-    console.error('⏰ Timeout: la connexion à MongoDB prend trop de temps.');
-}, 10000); // 10 secondes
-
-mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+mongoose.connect(MONGO_URI)
     .then(() => {
-        clearTimeout(mongoTimeout);
         console.log('✅ Connecté à MongoDB');
-        console.log('Connexion à Discord...');
         client.login(TOKEN);
     })
-    .catch(err => {
-        clearTimeout(mongoTimeout);
-        console.error('Erreur MongoDB:', err);
-    });
-
-mongoose.connection.on('error', err => {
-    console.error('Erreur de connexion MongoDB :', err);
-});
+    .catch(() => process.exit(1));

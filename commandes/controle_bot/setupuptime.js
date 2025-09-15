@@ -40,15 +40,25 @@ module.exports = {
         // Sauvegarde l'ID du salon dans un fichier
         fs.writeFileSync(UPTIME_FILE, JSON.stringify({ channelId: channel.id }, null, 2));
 
-        const embed = new EmbedBuilder()
+        // Embed principal comme au lancement du bot
+        const mainEmbed = new EmbedBuilder()
+            .setTitle('✅ Redémarrage terminé')
+            .setDescription('Le bot a bien redémarré et est opérationnel !')
+            .setColor(0x57F287)
+            .setTimestamp();
+
+        // Envoie l'embed dans le salon uptime
+        await channel.send({ embeds: [mainEmbed] });
+
+        // Réponse à l'utilisateur
+        const confirmEmbed = new EmbedBuilder()
             .setTitle('✅ Salon uptime configuré')
             .setDescription(`Salon <#${channel.id}> configuré pour l'uptime !`)
             .setColor(0x57F287);
-
         if (isSlash) {
-            await interaction.reply({ embeds: [embed], flags: 64 });
+            await interaction.reply({ embeds: [confirmEmbed], flags: 64 });
         } else {
-            await interaction.reply({ embeds: [embed] });
+            await interaction.reply({ embeds: [confirmEmbed] });
         }
     },
     help: false // Pour ne pas l'afficher dans le help
