@@ -5,6 +5,8 @@ const TOKEN = process.env.TOKEN;
 const MONGO_URI = process.env.MONGO_URI;
 const chokidar = require('chokidar');
 const { exec } = require('child_process');
+const mongoose = require('mongoose');
+const ServerConfig = require('./commandes/configuration_serveur/serverConfig');
 
 const client = new Client({
     intents: [
@@ -108,6 +110,13 @@ fs.watch(__filename, () => {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
+    // Vérifie la config serveur pour slashEnabled
+    let slashEnabled = true;
+    if (interaction.guildId) {
+        const config = await ServerConfig.findOne({ guildId: interaction.guildId });
+        if (config && config.slashEnabled === false) return;
+    }
+
     const command = client.commands.get(interaction.commandName);
 
     if (!command) return;
@@ -192,5 +201,10 @@ function deployCommands() {
         console.log('✅ Commandes slash mises à jour automatiquement !');
     });
 }
+
+// Connexion à MongoDB
+mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+    .then(() => console.log('✅ Connecté à MongoDB'))
+    .catch(err => console.error('Erreur MongoDB:', err));
 
 client.login(TOKEN);
