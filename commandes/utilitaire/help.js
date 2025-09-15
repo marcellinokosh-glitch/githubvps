@@ -16,8 +16,11 @@ module.exports = {
             const files = fs.readdirSync(path.join(commandesPath, categorie)).filter(f => f.endsWith('.js'));
             const commandNames = files.map(f => {
                 const cmd = require(path.join(commandesPath, categorie, f));
-                return `\`/${cmd.data.name}\``;
-            });
+                if (cmd && cmd.data && cmd.data.name) {
+                    return `\`/${cmd.data.name}\``;
+                }
+                return null;
+            }).filter(Boolean);
             if (commandNames.length > 0) {
                 description += `**${categorie}**\n${commandNames.join(' ')}\n\n`;
             }

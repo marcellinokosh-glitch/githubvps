@@ -1,6 +1,9 @@
+require('dotenv').config();
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+console.log('TOKEN:', process.env.TOKEN);
+console.log('MONGO_URI:', process.env.MONGO_URI);
 const TOKEN = process.env.TOKEN;
 const MONGO_URI = process.env.MONGO_URI;
 const chokidar = require('chokidar');
@@ -24,7 +27,11 @@ fs.readdirSync(commandesPath).forEach(categorie => {
     fs.readdirSync(categoriePath).forEach(file => {
         if (file.endsWith('.js')) {
             const command = require(path.join(categoriePath, file));
-            client.commands.set(command.data.name, command);
+            if (command && command.data && command.data.name) {
+                client.commands.set(command.data.name, command);
+            } else {
+                console.warn(`[WARN] Commande ignorée (pas de data.name): ${categorie}/${file}`);
+            }
         }
     });
 });
@@ -202,9 +209,23 @@ function deployCommands() {
     });
 }
 
-// Connexion à MongoDB
-mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-    .then(() => console.log('✅ Connecté à MongoDB'))
-    .catch(err => console.error('Erreur MongoDB:', err));
+console.log('Connexion à MongoDB...');
+const mongoTimeout = setTimeout(() => {
+    console.error('⏰ Timeout: la connexion à MongoDB prend trop de temps.');
+}, 10000); // 10 secondes
 
-client.login(TOKEN);
+mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+    .then(() => {
+        clearTimeout(mongoTimeout);
+        console.log('✅ Connecté à MongoDB');
+        console.log('Connexion à Discord...');
+        client.login(TOKEN);
+    })
+    .catch(err => {
+        clearTimeout(mongoTimeout);
+        console.error('Erreur MongoDB:', err);
+    });
+
+mongoose.connection.on('error', err => {
+    console.error('Erreur de connexion MongoDB :', err);
+});
