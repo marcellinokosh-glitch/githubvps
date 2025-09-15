@@ -61,7 +61,7 @@ module.exports = {
         }
 
         if (typeof interaction.reply === 'function' && interaction.isChatInputCommand && interaction.isChatInputCommand()) {
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.reply({ embeds: [embed], flags: 64 });
         } else {
             await interaction.reply({ embeds: [embed] });
         }

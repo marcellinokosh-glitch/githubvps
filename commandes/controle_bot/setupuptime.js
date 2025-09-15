@@ -21,7 +21,7 @@ module.exports = {
                 .setDescription("Tu n'as pas la permission d'utiliser cette commande.")
                 .setColor(0xED4245);
             if (isSlash) {
-                return interaction.reply({ embeds: [embed], ephemeral: true });
+                return interaction.reply({ embeds: [embed], flags: 64 });
             } else {
                 return interaction.reply({ embeds: [embed] });
             }
@@ -46,7 +46,7 @@ module.exports = {
             .setColor(0x57F287);
 
         if (isSlash) {
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.reply({ embeds: [embed], flags: 64 });
         } else {
             await interaction.reply({ embeds: [embed] });
         }

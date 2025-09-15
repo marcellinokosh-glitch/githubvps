@@ -33,14 +33,14 @@ module.exports = {
                 .setDescription("Tu n'as pas la permission d'utiliser cette commande.")
                 .setColor(0xED4245);
             if (isSlash) {
-                return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+                return interaction.reply({ embeds: [errorEmbed], flags: 64 });
             } else {
                 return interaction.reply({ embeds: [errorEmbed] });
             }
         }
 
         if (isSlash) {
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.reply({ embeds: [embed], flags: 64 });
         } else {
             await interaction.reply({ embeds: [embed] });
         }

@@ -118,7 +118,7 @@ client.on('interactionCreate', async interaction => {
         console.error(error);
         // Ne répond que si ce n'est pas déjà fait
         if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: 'Erreur lors de l\'exécution de la commande.', ephemeral: true });
+            await interaction.reply({ content: 'Erreur lors de l\'exécution de la commande.', flags: 64 });
         }
     }
 });
