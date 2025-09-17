@@ -1,0 +1,56 @@
+{
+  "setname": [
+    "dev"
+  ],
+  "setpic": [
+    "dev"
+  ],
+  "setbanner": [
+    "dev"
+  ],
+  "setcolor": [
+    "dev"
+  ],
+  "grade": [
+    "owner"
+  ],
+  "sethelp": [
+    "dev"
+  ],
+  "restart": [
+    "dev"
+  ],
+  "setprefix": [
+    "owner"
+  ],
+  "setupuptime": [
+    "owner"
+  ],
+  "permissions": [
+    "owner"
+  ],
+  "setperm": [
+    "dev"
+  ],
+  "help": [],
+  "ms": [],
+  "ping": [],
+  "statut": [
+    "owner"
+  ],
+  "play": [],
+  "resume": [],
+  "skip": [],
+  "stop": [],
+  "queue": [],
+  "volume": [],
+  "fun": [],
+  "logs": [],
+  "antiraid": [],
+  "moderation": [],
+  "gestion_serveur": [],
+  "configuration_serveur": [],
+  "changeperm": [
+    "dev"
+  ]
+}

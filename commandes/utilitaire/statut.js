@@ -1,69 +1,83 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
-const statutFile = path.join(__dirname, '..', '..', 'statut.json');
+const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
+    name: "statut",
+    description: "Change le statut et l'activité du bot (dev uniquement)",
     data: new SlashCommandBuilder()
         .setName('statut')
-        .setDescription('Change le statut du bot')
-        .addStringOption(option =>
-            option.setName('type')
-                .setDescription('Type de statut')
-                .setRequired(true)
+        .setDescription("Change le statut et l'activité du bot")
+        .addStringOption(opt =>
+            opt.setName('type')
+                .setDescription('Type d\'activité')
+                .setRequired(false)
                 .addChoices(
-                    { name: 'En ligne', value: 'online' },
-                    { name: 'Inactif', value: 'idle' },
-                    { name: 'Ne pas déranger', value: 'dnd' },
-                    { name: 'Streaming', value: 'streaming' }
+                    { name: 'Joue à', value: 'PLAYING' },
+                    { name: 'Regarde', value: 'WATCHING' },
+                    { name: 'Écoute', value: 'LISTENING' },
+                    { name: 'Compétition', value: 'COMPETING' },
+                    { name: 'Stream', value: 'STREAMING' }
                 )
         )
-        .addStringOption(option =>
-            option.setName('texte')
-                .setDescription('Texte à afficher dans le statut')
+        .addStringOption(opt =>
+            opt.setName('texte')
+                .setDescription('Texte de l\'activité')
                 .setRequired(false)
+        )
+        .addStringOption(opt =>
+            opt.setName('url')
+                .setDescription('URL du stream (obligatoire pour STREAMING)')
+                .setRequired(false)
+        )
+        .addStringOption(opt =>
+            opt.setName('statut')
+                .setDescription('Statut du bot')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'En ligne', value: 'online' },
+                    { name: 'Absent', value: 'idle' },
+                    { name: 'Ne pas déranger', value: 'dnd' },
+                    { name: 'Invisible', value: 'invisible' }
+                )
         ),
-    async execute(interaction) {
-        // Récupère les arguments pour slash ou préfixe
-        let type, texte;
-        if (interaction.options?.getString) {
-            type = interaction.options.getString('type') || interaction.options.getString();
-            texte = interaction.options.getString('texte') || null;
+    async execute(context, args) {
+        const { hasGrade } = require('../../utils/grades');
+        const userId = context.user?.id || context.author?.id;
+        if (!hasGrade(userId, 'dev')) {
+            return context.reply({ content: "❌ Seuls les développeurs du bot peuvent changer le statut.", flags: 64 });
+        }
+
+        const isSlash = !!context.isChatInputCommand;
+        let type, texte, statut, url;
+        if (isSlash) {
+            type = context.options.getString('type');
+            texte = context.options.getString('texte');
+            statut = context.options.getString('statut');
+            url = context.options.getString('url');
         } else {
-            // Pour le préfixe : !statut type texte
-            const args = interaction.content?.split(' ').slice(1) || [];
             type = args[0];
-            texte = args.slice(1).join(' ') || null;
+            texte = args[1];
+            url = args[2];
+            statut = args[3];
         }
 
-        let embed;
-        if (type === 'streaming') {
-            const activity = texte || 'en live !';
-            const url = 'https://twitch.tv/vicieuu';
-            await interaction.client.user.setActivity(activity, {
-                type: 'STREAMING',
-                url: url
-            });
-            await interaction.client.user.setStatus('online');
-            fs.writeFileSync(statutFile, JSON.stringify({ type: 'streaming', activity, url }, null, 2));
-            embed = new EmbedBuilder()
-                .setTitle('🎥 Statut')
-                .setDescription(`Statut changé en streaming${texte ? ` : ${texte}` : ' !'}`)
-                .setColor(0x5865F2);
-        } else {
-            await interaction.client.user.setActivity(texte || null);
-            await interaction.client.user.setStatus(type);
-            fs.writeFileSync(statutFile, JSON.stringify({ type, activity: texte || null }, null, 2));
-            embed = new EmbedBuilder()
-                .setTitle('🟢 Statut')
-                .setDescription(`Statut changé en ${type}${texte ? ` : ${texte}` : ' !'}`)
-                .setColor(0x5865F2);
-        }
-
-        if (typeof interaction.reply === 'function' && interaction.isChatInputCommand && interaction.isChatInputCommand()) {
-            await interaction.reply({ embeds: [embed], flags: 64 });
-        } else {
-            await interaction.reply({ embeds: [embed] });
+        try {
+            if (type && texte) {
+                if (type === 'STREAMING') {
+                    if (!url) {
+                        return context.reply({ content: "❌ Merci de fournir une URL Twitch valide pour le mode STREAMING.", flags: 64 });
+                    }
+                    await context.client.user.setActivity(texte, { type: 'STREAMING', url });
+                } else {
+                    await context.client.user.setActivity(texte, { type });
+                }
+            }
+            if (statut) {
+                await context.client.user.setStatus(statut);
+            }
+            return context.reply({ content: "✅ Statut du bot mis à jour !" });
+        } catch (err) {
+            console.error("Erreur statut :", err);
+            return context.reply({ content: "❌ Erreur lors du changement de statut." });
         }
     }
 };

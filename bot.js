@@ -1,272 +1,282 @@
-require('dotenv').config();
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
+// Imports uniques en haut du fichier
 const fs = require('fs');
 const path = require('path');
-const TOKEN = process.env.TOKEN;
-const MONGO_URI = process.env.MONGO_URI;
-const chokidar = require('chokidar');
-const { exec } = require('child_process');
+console.log('=== Début du script bot.js (MongoDB + Discord.js minimal) ===');
+require('dotenv').config();
 const mongoose = require('mongoose');
+const { Client, GatewayIntentBits } = require('discord.js');
+const GuildConfig = require('./commandes/configuration_serveur/guildConfig');
 
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ]
+const playdl = require('play-dl');
+console.log('[DEBUG] Méthodes cookies play-dl:', {
+  setCookieFile: typeof playdl.setCookieFile,
+  setCookiesFromFile: typeof playdl.setCookiesFromFile,
+  cookies: typeof playdl.cookies
 });
+console.log('[DEBUG] SPOTIFY_CLIENT_ID =', process.env.SPOTIFY_CLIENT_ID);
+console.log('[DEBUG] SPOTIFY_CLIENT_SECRET =', process.env.SPOTIFY_CLIENT_SECRET ? '[OK]' : '[ABSENT]');
+if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
+  playdl.setToken({
+    spotify: {
+      client_id: process.env.SPOTIFY_CLIENT_ID,
+      client_secret: process.env.SPOTIFY_CLIENT_SECRET
+    }
+  });
+  console.log('Identifiants Spotify chargés pour play-dl.');
+} else {
+  console.warn('SPOTIFY_CLIENT_ID ou SPOTIFY_CLIENT_SECRET manquant dans .env. Les liens Spotify ne fonctionneront pas.');
+}
 
-client.commands = new Collection();
+// Chargement des cookies YouTube pour play-dl (si le fichier existe)
+const cookiesPath = './youtube_cookies.txt';
+if (fs.existsSync(cookiesPath)) {
+  let cookiesLoaded = false;
+  try {
+    if (typeof playdl.setCookiesFromFile === 'function') {
+      playdl.setCookiesFromFile(cookiesPath);
+      console.log('Cookies YouTube chargés avec setCookiesFromFile pour play-dl.');
+      cookiesLoaded = true;
+    }
+  } catch (e) {
+    console.warn('setCookiesFromFile a échoué :', e.message || e);
+  }
+  if (!cookiesLoaded) {
+    try {
+      if (typeof playdl.setCookieFile === 'function') {
+        playdl.setCookieFile(cookiesPath);
+        console.log('Cookies YouTube chargés avec setCookieFile pour play-dl.');
+        cookiesLoaded = true;
+      }
+    } catch (e) {
+      console.warn('setCookieFile a échoué :', e.message || e);
+    }
+  }
+  if (!cookiesLoaded) {
+    console.warn('Aucune méthode compatible trouvée pour charger les cookies YouTube dans play-dl.');
+  }
+} else {
+  console.warn('Fichier youtube_cookies.txt non trouvé. Certaines vidéos YouTube protégées peuvent ne pas fonctionner.');
+}
 
-const commandesPath = path.join(__dirname, 'commandes');
-fs.readdirSync(commandesPath).forEach(categorie => {
-    const categoriePath = path.join(commandesPath, categorie);
-    fs.readdirSync(categoriePath).forEach(file => {
-        if (file.endsWith('.js')) {
-            const command = require(path.join(categoriePath, file));
-            // Ajoute si commande slash (data.name) ou prefix (name)
-            if (command && command.data && command.data.name) {
-                client.commands.set(command.data.name, command);
-            } else if (command && command.name) {
-                client.commands.set(command.name, command);
-            }
-            // Sinon, ignore silencieusement
-        }
-    });
+// Gestion .update-reload après les imports
+const updateFlagFile = path.join(__dirname, '.update-reload');
+let shouldSendUpdateLog = false;
+if (fs.existsSync(updateFlagFile)) {
+  shouldSendUpdateLog = true;
+  try { fs.unlinkSync(updateFlagFile); } catch {}
+}
+// Gestion arrêt propre : envoie un message dans le salon uptime
+async function handleBotShutdown(signal) {
+  await sendUptimeLog({
+    client,
+    status: 'hors ligne',
+    color: 0xED4245,
+    extra: `Arrêté le <t:${Math.floor(Date.now()/1000)}:f>\nRaison : ${signal || 'process.exit()'}`
+  });
+}
+
+// Intercepte SIGINT/SIGTERM et process.exit
+['SIGINT', 'SIGTERM'].forEach(sig => {
+  process.on(sig, async () => {
+    await handleBotShutdown(sig);
+    process.exit(0);
+  });
 });
-
-const uptimeFile = path.join(__dirname, 'uptime_channel.json');
-let uptimeChannelId = null;
-if (fs.existsSync(uptimeFile)) {
-    const data = JSON.parse(fs.readFileSync(uptimeFile, 'utf8'));
-    uptimeChannelId = data.channelId;
+const originalExit = process.exit;
+process.exit = async function(code) {
+  await handleBotShutdown('process.exit');
+  originalExit.call(process, code);
+};
+// Fonction utilitaire pour obtenir la couleur des embeds
+function getEmbedColor() {
+  let color = "#5865F2";
+  try {
+    color = fs.readFileSync('./embed_color.txt', 'utf8').trim();
+    // Si la couleur commence par #, la convertir en nombre pour Discord.js
+    if (color.startsWith('#')) color = parseInt(color.slice(1), 16);
+  } catch {}
+  return color;
 }
-
-function sendUptimeMessage(client, content) {
-    if (!content || typeof content !== 'string' || content.trim() === '') return; // Ajout de la vérification
-    if (uptimeChannelId) {
-        const channel = client.channels.cache.get(uptimeChannelId);
-        if (channel) channel.send({ content }).catch(() => {});
-    }
-}
-
-function sendUptimeEmbed(client, embed) {
-    if (uptimeChannelId) {
-        const channel = client.channels.cache.get(uptimeChannelId);
-        if (channel) channel.send({ embeds: [embed] }).catch(() => {});
-    }
-}
-
-const uptimeMessageFile = path.join(__dirname, 'uptime_message.json');
-
-client.once('clientReady', async () => {
-    console.log('🚀 Le bot est lancé !');
-
-    // Embed démarrage
-    if (uptimeChannelId) {
-        const { EmbedBuilder } = require('discord.js');
-        const startEmbed = new EmbedBuilder()
-            .setTitle('🟢 Le bot vient de démarrer !')
-            .setDescription('Le bot est en ligne et prêt à fonctionner.')
-            .setColor(0x57F287)
-            .setTimestamp();
-        const channel = client.channels.cache.get(uptimeChannelId);
-        if (channel) channel.send({ embeds: [startEmbed] }).catch(() => {});
-    }
-
-    // Envoie ou modifie l'embed de redémarrage dans le salon uptime
+async function sendUptimeLog({ client, status, color = null, extra = '' }) {
+  try {
+    const uptimeFile = path.join(__dirname, 'uptime_channel.json');
+    if (!fs.existsSync(uptimeFile)) return;
+    const { channelId } = JSON.parse(fs.readFileSync(uptimeFile, 'utf8'));
+    if (!channelId) return;
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel) return;
     const { EmbedBuilder } = require('discord.js');
     const embed = new EmbedBuilder()
-        .setTitle('✅ Redémarrage terminé')
-        .setDescription('Le bot a bien redémarré et est opérationnel !')
-        .setColor(0x57F287)
-        .setTimestamp();
-
-    if (uptimeChannelId) {
-        const channel = client.channels.cache.get(uptimeChannelId);
-        let messageId = null;
-
-        // Essaie de lire l'ID du message précédent
-        if (fs.existsSync(uptimeMessageFile)) {
-            try {
-                const data = JSON.parse(fs.readFileSync(uptimeMessageFile, 'utf8'));
-                messageId = data.messageId;
-            } catch {}
-        }
-
-        try {
-            if (messageId) {
-                // Essaie de modifier le message existant
-                const msg = await channel.messages.fetch(messageId);
-                await msg.edit({ embeds: [embed] });
-            } else {
-                // Sinon, envoie un nouveau message et sauvegarde son ID
-                const msg = await channel.send({ embeds: [embed] });
-                fs.writeFileSync(uptimeMessageFile, JSON.stringify({ messageId: msg.id }, null, 2));
-            }
-        } catch {
-            // Si le message n'existe plus, envoie un nouveau message et sauvegarde son ID
-            const msg = await channel.send({ embeds: [embed] });
-            fs.writeFileSync(uptimeMessageFile, JSON.stringify({ messageId: msg.id }, null, 2));
-        }
-    }
-});
-
-
-process.on('beforeExit', () => {
-    if (client && client.isReady() && uptimeChannelId) {
-        const { EmbedBuilder } = require('discord.js');
-        const stopEmbed = new EmbedBuilder()
-            .setTitle('🔴 Le bot va s\'éteindre !')
-            .setDescription('Le bot va s\'arrêter ou redémarrer.')
-            .setColor(0xED4245)
-            .setTimestamp();
-        const channel = client.channels.cache.get(uptimeChannelId);
-        if (channel) channel.send({ embeds: [stopEmbed] }).catch(() => {});
-    }
-});
-
-
-process.on('uncaughtException', (err) => {
-    if (client && client.isReady() && uptimeChannelId) {
-        const { EmbedBuilder } = require('discord.js');
-        const errorEmbed = new EmbedBuilder()
-            .setTitle('❌ Erreur non gérée')
-            .setDescription(`\`\`\`${err.stack}\`\`\``)
-            .setColor(0xED4245)
-            .setTimestamp();
-        const channel = client.channels.cache.get(uptimeChannelId);
-        if (channel) channel.send({ embeds: [errorEmbed] }).catch(() => {});
-    }
-});
-
-
-fs.watch(__filename, () => {
-    if (client && client.isReady() && uptimeChannelId) {
-        const { EmbedBuilder } = require('discord.js');
-        const reloadEmbed = new EmbedBuilder()
-            .setTitle('🛠️ Code rechargé')
-            .setDescription('Le code du bot a été modifié et rechargé.')
-            .setColor(0x5865F2)
-            .setTimestamp();
-        const channel = client.channels.cache.get(uptimeChannelId);
-        if (channel) channel.send({ embeds: [reloadEmbed] }).catch(() => {});
-    }
-});
-
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-
-    const command = client.commands.get(interaction.commandName);
-    if (!command) return;
-    try {
-        await command.execute(interaction);
-    } catch (error) {
-        console.error(error);
-        if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: 'Erreur lors de l\'exécution de la commande.', flags: 64 });
-        }
-    }
-});
-
-
-const GuildConfig = require('./commandes/configuration_serveur/guildConfig');
-const DEFAULT_PREFIX = '!';
-
-
-client.on('messageCreate', async message => {
-    if (message.author.bot) return;
-
-    // Récupère le préfixe personnalisé ou par défaut
-    let prefix = DEFAULT_PREFIX;
-    try {
-        if (message.guild) {
-            const config = await GuildConfig.findOne({ guildId: message.guild.id });
-            if (config && config.prefix) prefix = config.prefix;
-        }
-    } catch (e) {
-        // ignore erreur mongo, fallback sur le préfixe par défaut
-    }
-
-    if (!message.content.startsWith(prefix)) return;
-
-    const args = message.content.slice(prefix.length).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
-
-    const command = client.commands.get(commandName);
-    if (!command) return;
-
-    try {
-        // Crée un faux "interaction" pour compatibilité
-        await command.execute({
-            user: message.author,
-            member: message.member,
-            guild: message.guild,
-            channel: message.channel,
-            client: client,
-            reply: (options) => {
-                if (typeof options === 'string') return message.reply(options);
-                if (options.embeds) return message.reply({ embeds: options.embeds });
-                if (options.content) return message.reply(options.content);
-                return message.reply('Réponse vide.');
-            },
-            options: {
-                getString: () => args[0] // Prend le premier argument comme option string
-            },
-            isChatInputCommand: () => false
-        });
-    } catch (error) {
-        console.error(error);
-        message.reply('Erreur lors de l\'exécution de la commande.');
-    }
-});
-
-// Fonction pour charger toutes les commandes
-function loadCommands() {
-    client.commands.clear();
-    fs.readdirSync(commandesPath).forEach(categorie => {
-        const categoriePath = path.join(commandesPath, categorie);
-        fs.readdirSync(categoriePath).forEach(file => {
-            if (file.endsWith('.js')) {
-                delete require.cache[require.resolve(path.join(categoriePath, file))];
-                const command = require(path.join(categoriePath, file));
-                if (command && command.data && command.data.name) {
-                    client.commands.set(command.data.name, command);
-                } else if (command && command.name) {
-                    client.commands.set(command.name, command);
-                }
-                // Sinon, ignore silencieusement
-            }
-        });
-    });
+      .setTitle('`🔔` État du bot')
+      .setDescription(`Le bot est **${status}**\n${extra}`)
+      .setColor(color ?? getEmbedColor())
+      .setTimestamp();
+    await channel.send({ embeds: [embed] });
+  } catch (e) {
+    console.error('[uptime log] Impossible d\'envoyer le log uptime :', e);
+  }
 }
 
+const DEFAULT_PREFIX = '!';
+
+const client = new Client({ intents: [
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.MessageContent
+] });
+
+// Handler pour les interactions (slash commands)
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+  console.log('[slash] interaction reçue :', interaction.commandName);
+  const command = client.slashCommands.get(interaction.commandName);
+  if (!command || typeof command.execute !== 'function') {
+    console.warn(`[slash] Commande non trouvée ou sans execute : ${interaction.commandName}`);
+    return;
+  }
+  // Permissions avancées (si définies dans la commande)
+  if (command.permissions && interaction.guild && interaction.member && !interaction.member.permissions.has(command.permissions)) {
+  const { MessageFlags } = require('discord.js');
+  return interaction.reply({ content: '❌ Tu n\'as pas la permission d\'utiliser cette commande.', flags: MessageFlags.Ephemeral });
+  }
+  try {
+    await command.execute(interaction);
+    console.log(`[slash] Commande exécutée : ${interaction.commandName}`);
+  } catch (error) {
+    console.error(`[slash] Erreur dans ${interaction.commandName} :`, error);
+    if (!interaction.replied && !interaction.deferred) {
+  const { MessageFlags } = require('discord.js');
+  await interaction.reply({ content: '❌ Erreur lors de l\'exécution de la commande.', flags: MessageFlags.Ephemeral });
+    }
+  }
+});
+
+// Système de chargement dynamique des commandes (textuelles et slash)
+client.commands = new Map();
+client.slashCommands = new Map();
+function loadCommands() {
+  client.commands.clear();
+  client.slashCommands.clear();
+  const commandesPath = path.join(__dirname, 'commandes');
+  fs.readdirSync(commandesPath).forEach(categorie => {
+    const categoriePath = path.join(commandesPath, categorie);
+    if (fs.statSync(categoriePath).isDirectory()) {
+      fs.readdirSync(categoriePath).forEach(file => {
+        if (file.endsWith('.js')) {
+          const filePath = path.join(categoriePath, file);
+          delete require.cache[require.resolve(filePath)];
+          const command = require(filePath);
+          // Commande textuelle
+          if (command && command.name && typeof command.execute === 'function') {
+            client.commands.set(command.name, command);
+          }
+          // Commande slash
+          if (command && command.data && command.data.name && typeof command.execute === 'function') {
+            client.slashCommands.set(command.data.name, command);
+          }
+        }
+      });
+    }
+  });
+  console.log(`✅ ${client.commands.size} commandes textuelles, ${client.slashCommands.size} slash commands chargées.`);
+}
 // Chargement initial
 loadCommands();
 
-// Hot reload avec chokidar
-chokidar.watch(commandesPath, { ignoreInitial: true })
-    .on('add', () => deployCommands())
-    .on('change', () => deployCommands())
-    .on('unlink', () => deployCommands());
+// Nouveau handler messageCreate (text commands, permissions, préfixe dynamique)
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  let prefix = DEFAULT_PREFIX;
+  if (message.guild) {
+    try {
+      const config = await GuildConfig.findOne({ guildId: message.guild.id });
+      if (config && config.prefix) prefix = config.prefix;
+    } catch (e) {}
+  }
+  // Répond à la mention du bot avec le préfixe
+  if (message.mentions.has(client.user) && message.content.trim().match(new RegExp(`^<@!?${client.user.id}>$`))) {
+    return message.reply(`Mon préfixe ici est : \`${prefix}\``);
+  }
+  // Gestion des commandes textuelles
+  if (!message.content.startsWith(prefix)) return;
+  const args = message.content.slice(prefix.length).trim().split(/ +/);
+  const commandName = args.shift().toLowerCase();
+  const command = client.commands.get(commandName);
+  if (!command || typeof command.execute !== 'function') return;
+  // Permissions avancées (si définies dans la commande)
+  if (command.permissions && message.guild && !message.member.permissions.has(command.permissions)) {
+    return message.reply('❌ Tu n\'as pas la permission d\'utiliser cette commande.');
+  }
+  try {
+    await command.execute(message, args, prefix);
+  } catch (error) {
+    console.error(error);
+    message.reply('❌ Erreur lors de l\'exécution de la commande.');
+  }
+});
 
-function deployCommands() {
-    exec('node deploy-commands.js', (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Erreur lors du déploiement des commandes : ${error.message}`);
-            return;
-        }
-        if (stderr) {
-            console.error(`Erreur : ${stderr}`);
-            return;
-        }
-        console.log('✅ Commandes slash mises à jour automatiquement !');
-    });
-}
+// Pour snipe
+const snipe = require('./commandes/utilitaire/snipe.js');
+const editsnipe = require('./commandes/utilitaire/editsnipe.js');
 
-mongoose.connect(MONGO_URI)
-    .then(() => {
-        console.log('✅ Connecté à MongoDB');
-        client.login(TOKEN);
-    })
-    .catch(() => process.exit(1));
+// Stockage global pour les snipes
+global.lastDeleted = {};
+global.lastEdit = {};
+
+// Message supprimé
+client.on('messageDelete', msg => {
+    if (msg.partial || !msg.content) return;
+    global.lastDeleted[msg.channel.id] = {
+        content: msg.content,
+        author: msg.author.tag,
+        time: new Date().toLocaleTimeString()
+    };
+});
+
+// Message édité
+client.on('messageUpdate', (oldMsg, newMsg) => {
+    if (oldMsg.partial || newMsg.partial || !oldMsg.content || !newMsg.content) return;
+    global.lastEdit[oldMsg.channel.id] = {
+        old: oldMsg.content,
+        new: newMsg.content,
+        author: oldMsg.author.tag,
+        time: new Date().toLocaleTimeString()
+    };
+});
+
+
+
+console.log('Tentative de connexion MongoDB...');
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log('✅ Connexion MongoDB réussie !');
+    console.log('Tentative de connexion Discord...');
+    client.login(process.env.TOKEN)
+      .then(async () => {
+        console.log('✅ Connecté à Discord !');
+        // Envoie le log d'état dans le salon uptime
+        if (shouldSendUpdateLog) {
+          await sendUptimeLog({
+            client,
+            status: 'mis à jour',
+            color: 0x3498DB,
+            extra: `Le bot vient d'être mis à jour et relancé le <t:${Math.floor(Date.now()/1000)}:f>`
+          });
+        } else {
+          await sendUptimeLog({
+            client,
+            status: 'en ligne',
+            color: 0x57F287,
+            extra: `Démarré le <t:${Math.floor(Date.now()/1000)}:f>`
+          });
+        }
+      })
+      .catch(err => {
+        console.error('❌ Erreur Discord :', err);
+        process.exit(1);
+      });
+  })
+  .catch(err => {
+    console.error('❌ Erreur MongoDB :', err);
+    process.exit(1);
+  });
